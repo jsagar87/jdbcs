@@ -35,7 +35,7 @@ public class JDBCTest {
         String user = "postgres";
         String password = "postgres";
 
-        // Required driver
+        // Required driverf
         String driverClassName = "org.postgresql.Driver";
 
         try {
@@ -70,25 +70,46 @@ public class JDBCTest {
                     Actor actor = new Actor();
                     actor.setLastName("Jariwala");
                     actor.setActor_id(201);
-                    int success = dao.update(connection,actor);
+                    int[] success = dao.update(connection,actor);
                     System.out.println(success + " rows updated");
                 } else if ("delete".equals(crud[0])) {
                     int success = dao.delete(connection, 201);
                     System.out.println(success + " rows deleted");
                 } else {
                     if (!"".equals(crud[1])){
-                        // Query the database
-                        result = dao.get(connection,201);
+                        if ("200".equals(crud[1])) {
+                            // Query the database
+                            result = dao.get(connection, 201);
+                            // Iterating result set
+                            while (result.next()) {
+                                Integer id = result.getInt("actor_id");
+                                String f_name = result.getString("first_name");
+                                String l_name = result.getString("last_name");
+                                System.out.println("Id : " + id + " f_name: " + f_name + " l_name : " + l_name);
+                            }
+                        }
+                        else
+                        {
+                            result = dao.getFilmsByActor(connection,200);
+                            // Iterating result set
+                            System.out.println("Actor  \t  Movie   \t Description ");
+                            while (result.next()) {
+                                String actor = result.getString("actor_name");
+                                String movie = result.getString("film_title");
+                                String description = result.getString("film_description");
+                                System.out.println(actor  + " | " + movie + " | " + description);
+                            }
+                        }
                     }else {
                         // Query the database
                         result = dao.getAll(connection);
-                    }
-                    // Iterating result set
-                    while (result.next()) {
-                        Integer id = result.getInt("actor_id");
-                        String f_name = result.getString("first_name");
-                        String l_name = result.getString("last_name");
-                        System.out.println("Id : " + id + " f_name: " + f_name + " l_name : " + l_name);
+                        // Iterating result set
+                        while (result.next()) {
+                            Integer id = result.getInt("actor_id");
+                            String f_name = result.getString("first_name");
+                            String l_name = result.getString("last_name");
+                            System.out.println("Id : " + id + " f_name: " + f_name + " l_name : " + l_name);
+                        }
                     }
                 }
 
@@ -150,6 +171,8 @@ interface DataAccessObject<Actor>{
      */
     ResultSet get(Connection conn,int id) throws SQLException;
 
+    ResultSet getFilmsByActor(Connection conn,int id) throws SQLException;
+
     /**
      *
      * @param conn Supply active connection object
@@ -157,7 +180,7 @@ interface DataAccessObject<Actor>{
      * @return number of updated records
      * @throws SQLException if a database access error occurs, this method is called on a closed connection or the given parameters are not ResultSet constants indicating type and concurrency
      */
-    int update(Connection conn,Actor item) throws SQLException;
+    int[] update(Connection conn,Actor item) throws SQLException;
 
     /**
      *
@@ -194,29 +217,54 @@ class ActorDaoImpl implements DataAccessObject<Actor>{
         Statement statement = conn.createStatement();
         String sql = "SELECT a.actor_id, a.first_name, a.last_name FROM actor a where a.actor_id > 195;";
         ResultSet result = statement.executeQuery(sql);
-        conn.close();
         return result;
     }
     public ResultSet get(Connection conn,int id)
             throws SQLException {
 
-        Statement statement = conn.createStatement(
+        String sql = "SELECT a.actor_id, a.first_name, a.last_name FROM actor a where a.actor_id = ?";
+        PreparedStatement statement = conn.prepareCall(
+                sql,
                 ResultSet.TYPE_SCROLL_SENSITIVE,
                 ResultSet.CONCUR_READ_ONLY,
                 ResultSet.CLOSE_CURSORS_AT_COMMIT
         );
-        String sql = "SELECT a.actor_id, a.first_name, a.last_name FROM actor a where a.actor_id = ?";
-        ResultSet result = statement.executeQuery(sql);
-        conn.close();
+        statement.setInt(1,id);
+        ResultSet result = statement.executeQuery();
         return result;
     }
-    /********* UPDATE **********/
-    public int update(Connection conn,Actor actor)
+    public ResultSet getFilmsByActor(Connection conn,int id)
             throws SQLException {
-        Statement statement = conn.createStatement();
-        String sql = "UPDATE actor SET last_name='" + actor.getLastName() + "' where actor_id=" + actor.getActor_id();
-        int result = statement.executeUpdate(sql);
+        CallableStatement filmsByActorProcedure = conn.prepareCall("{call films_by_actors(?)}");
+        filmsByActorProcedure.setInt(1,id);
+        ResultSet result = filmsByActorProcedure.executeQuery();
         return result;
+    }
+    /********* UPDATE **********/ /***** added batch & transaction logic *****/
+    public int[] update(Connection conn,Actor actor)
+            throws SQLException {
+        Statement statement = null;
+        try {
+            conn.setAutoCommit(false);
+
+            statement = conn.createStatement();
+            // Add 1st item to the batch
+            String sql = "UPDATE actor SET last_name='" + actor.getLastName()
+                    + "' where actor_id=" + actor.getActor_id();
+            statement.addBatch(sql);
+            // Add 2nd item to the batch
+
+            int[] results = statement.executeBatch();
+
+            conn.commit();
+            return results;
+        }catch (SQLException sqlException){
+            conn.rollback();
+            System.out.println("Transaction rolled back");
+            throw new SQLException();
+        }finally {
+            if (statement!= null) statement.close();
+        }
     }
     /********* DELETE **********/
     public int delete(Connection conn,int id)
